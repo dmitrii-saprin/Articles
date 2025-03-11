@@ -1,91 +1,118 @@
-# 📌 Как экспортировать проекты GitLab с помощью gitlab-rails console и Bash-скрипта
+# 📌 How to Export GitLab Projects Using `gitlab-rails console` and a Bash Script
 
-В этой статье мы разберём процесс экспорта проектов в GitLab с использованием внутренней утилиты **gitlab-rails console** и автоматизации через **Bash-скрипт**. Этот метод полезен, если стандартные Rake-задачи (`gitlab:import_export:export`) не работают из-за ошибок или ограничений. Мы предоставим пошаговую инструкцию с проверкой и готовым скриптом.
-
----
-
-## 🎯 Что мы делаем
-
-Мы экспортируем проекты GitLab (например, `your_project/infrastructure/terraform` и `your_project/infrastructure/tfmodules`) в виде архивов `.tar.gz`, содержащих:
-- Репозиторий
-- Метаданные (issues, merge requests, pipelines и т. д.)
-- Всё необходимое для импорта в другой GitLab-инстанс
-
-Если Rake-задачи не работают, мы используем `gitlab-rails console` и Bash-скрипт.
+In this guide, we'll cover exporting GitLab projects using the internal **`gitlab-rails console`** utility and automating the process with a **Bash script**. This approach is especially useful when standard Rake tasks (`gitlab:import_export:export`) encounter issues or limitations. You'll find detailed instructions, verification steps, and a ready-to-use script below.
 
 ---
 
-## 🔹 Что такое gitlab-rails console?
-`gitlab-rails console` — это интерактивная **Ruby-консоль**, встроенная в GitLab, которая позволяет работать с внутренними объектами приложения и базой данных.
+## 🎯 What We're Doing
 
-### Почему использовать `gitlab-rails console`?
-✅ **Обход ошибок**: если стандартные Rake-задачи не работают (например, с вложенными группами).  
-✅ **Гибкость**: можно проверить доступ, структуру проекта и запустить экспорт в одном месте.  
-✅ **Административный доступ**: консоль доступна только на self-managed GitLab и требует прав администратора.  
-✅ **Асинхронность**: экспорт выполняется в фоновом режиме через Sidekiq.
+We'll export GitLab projects (e.g., `your_project/infrastructure/terraform` and `your_project/infrastructure/tfmodules`) into `.tar.gz` archives containing:
+
+- Repository
+- Metadata (issues, merge requests, pipelines, etc.)
+- Everything required for importing into another GitLab instance
+
+If standard Rake tasks fail, we'll use `gitlab-rails console` alongside a Bash script.
 
 ---
 
-## 🛠️ Пошаговая инструкция
+## 🔹 What is `gitlab-rails console`?
 
-### **1. Запуск `gitlab-rails console`**
-Подключитесь к серверу GitLab через SSH и запустите консоль:
+`gitlab-rails console` is an interactive **Ruby console** built into GitLab, allowing direct interaction with internal application objects and the database.
+
+### Why Use `gitlab-rails console`?
+
+- ✅ **Bypassing Errors:** Useful when Rake tasks fail (e.g., nested groups).
+- ✅ **Flexibility:** Verify access, check project structures, and initiate exports from one interface.
+- ✅ **Administrative Access:** Available only on self-managed GitLab with admin rights.
+- ✅ **Asynchronous:** Exports run asynchronously in the background via Sidekiq.
+
+---
+
+## 🛠️ Step-by-Step Guide
+
+### 1. Launching `gitlab-rails console`
+
+Connect to your GitLab server via SSH and run:
+
 ```bash
 sudo gitlab-rails console
 ```
-Вы увидите приглашение: `irb(main):001:0>` для ввода команд.
 
-### **2. Проверка и запуск экспорта**
+You’ll see the prompt: `irb(main):001:0>`.
 
-#### **Проверка пользователя и проекта**
+### 2. Checking and Initiating Export
+
+#### Check User and Project
+
 ```ruby
 user = User.find_by_username('your_user')
 project = Project.find_by_full_path('your_project/infrastructure/terraform')
 ```
-Если `user` или `project` возвращают `nil`, проверьте:
-- Имя пользователя (в профиле GitLab)
-- Точный путь проекта (из URL проекта)
 
-#### **Запуск экспорта**
+If either returns `nil`, verify:
+
+- Username (GitLab profile)
+- Exact project path (project URL)
+
+#### Start Export
+
 ```ruby
 ProjectExportWorker.new.perform(user.id, project.id)
-puts "Экспорт запущен для #{project.full_path}"
+puts "Export started for #{project.full_path}"
 ```
-Вывод: `Экспорт запущен для your_project/infrastructure/terraform`.
 
-**Примечание:** Могут появиться сообщения вроде `Scoped order is ignored, it's forced to be batch order.` — это нормальное поведение Sidekiq.
+Output:
 
-### **3. Поиск результата**
-Архив создаётся в директории `/var/opt/gitlab/gitlab-rails/uploads/-/system/import_export_upload/export_file/`. Выйдите из консоли (`exit`) и выполните:
+```
+Export started for your_project/infrastructure/terraform
+```
+
+**Note:** Messages like `Scoped order is ignored, it's forced to be batch order.` are normal Sidekiq behavior.
+
+### 3. Locating the Exported Archive
+
+The archive is created in:
+
+```
+/var/opt/gitlab/gitlab-rails/uploads/-/system/import_export_upload/export_file/
+```
+
+Exit the console (`exit`) and run:
 
 ```bash
 find /var/opt/gitlab/gitlab-rails/uploads/ -name "*.tar.gz" -mtime -1
 ```
-📌 `-mtime -1` ищет файлы, созданные за последние 24 часа.
 
-**Пример вывода:**
+📌 `-mtime -1` finds files created within the last 24 hours.
+
+Example output:
+
 ```
 /var/opt/gitlab/gitlab-rails/uploads/-/system/import_export_upload/export_file/<number>/<timestamp>_your_project_infrastructure_terraform_export.tar.gz
 ```
-Архив обычно находится в поддиректории с номером (например, `<number>`).
 
-Если архив не появился, подождите **5-30 минут** и повторите команду.
+The archive typically resides in a numbered subdirectory (e.g., `<number>`).
+
+If the archive doesn't appear immediately, wait **5–30 minutes** and repeat.
 
 ---
 
-## 🤖 Автоматизация с помощью Bash-скрипта
-Для экспорта нескольких проектов используйте скрипт **export.sh**:
+## 🤖 Automation via Bash Script
 
-### **Скрипт `export.sh`**
+Use the **export.sh** script for multiple projects:
+
+### `export.sh` Script
+
 ```bash
 #!/bin/bash
 
-# === 🔹 Конфигурация ===
+# === 🔹 Configuration ===
 GITLAB_USER="your_user"
 OUTPUT_DIR="archives"
 REPO_LIST=("your_project/infrastructure/terraform" "your_project/infrastructure/tfmodules")
 
-# === 🔹 Функции ===
+# === 🔹 Functions ===
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
 }
@@ -98,11 +125,11 @@ export_project() {
 
     mkdir -p "$(dirname "$archive_path")"
     if [[ -f "$archive_path" ]]; then
-        log "ℹ️ Архив $archive_path уже существует, пропускаем."
+        log "ℹ️ Archive $archive_path already exists, skipping."
         return 0
     fi
 
-    log "📤 Начинаем экспорт проекта $repo_path..."
+    log "📤 Starting export for project $repo_path..."
     echo "user = User.find_by_username('$GITLAB_USER'); project = Project.find_by_full_path('$repo_path'); ProjectExportWorker.new.perform(user.id, project.id)" | sudo gitlab-rails console > "$log_file" 2>&1
 
     local max_attempts=360
@@ -111,44 +138,43 @@ export_project() {
         local temp_archive=$(sudo find "$temp_dir" -name "*.tar.gz" -mtime -1)
         if [[ -n "$temp_archive" && -f "$temp_archive" ]]; then
             sudo mv "$temp_archive" "$archive_path"
-            log "✅ Экспорт проекта $repo_path сохранён: $archive_path"
+            log "✅ Export for project $repo_path saved: $archive_path"
             return 0
         fi
-        log "⏳ Ожидаем завершения экспорта $repo_path... (Попытка: $((attempt+1))/$max_attempts)"
+        log "⏳ Waiting for export completion of $repo_path... (Attempt: $((attempt+1))/$max_attempts)"
         sleep 10
         ((attempt++))
     done
 
-    log "❌ Ошибка экспорта $repo_path после 60 минут! Подробности в $log_file"
+    log "❌ Error exporting $repo_path after 60 minutes! Details in $log_file"
     cat "$log_file"
     return 1
 }
 
-log "🚀 Начинаем экспорт проектов..."
+log "🚀 Starting project exports..."
 mkdir -p "$OUTPUT_DIR"
 
 for repo in "${REPO_LIST[@]}"; do
-    log "🔧 Обрабатываем репозиторий: $repo"
+    log "🔧 Processing repository: $repo"
     export_project "$repo"
 done
 
-log "🎉 Все экспорты завершены!"
+log "🎉 All exports completed!"
 ```
 
 ---
 
-## 📌 Как работает скрипт
-✅ **Конфигурация**: Указаны пользователь (`your_user`), выходная директория (`archives`) и список проектов (`REPO_LIST`).  
-✅ **Функция `log`**: Логирует действия с временной меткой.  
-✅ **Функция `export_project`**:
-- Проверяет наличие архива.
-- Запускает экспорт через `gitlab-rails console`.
-- Ждёт до 60 минут, пока архив не появится.
-- Перемещает архив в `archives/your_project/infrastructure/`.
+## 📌 How the Script Works
 
-✅ **Основной процесс**: Перебирает проекты и вызывает `export_project`.
+- ✅ **Configuration:** User (`your_user`), output directory (`archives`), and project list (`REPO_LIST`).
+- ✅ **`log` Function:** Logs actions with timestamps.
+- ✅ **`export_project` Function:**
+    - Checks existing archives.
+    - Initiates exports via `gitlab-rails console`.
+    - Waits up to 60 minutes for archive creation.
+    - Moves the archive to specified output.
+- ✅ **Main Process:** Iterates over listed projects, calling `export_project`.
 
 ---
 
-🚀 gitlab-rails console и Bash-скрипт — это надёжный способ экспорта проектов GitLab, когда стандартные методы дают сбой. Консоль позволяет обойти ошибки, а скрипт автоматизирует процесс. Настройте GITLAB_USER, OUTPUT_DIR и REPO_LIST под свои нужды, и вы сможете легко создавать резервные копии или переносить проекты. 🔥
-
+🚀 Using `gitlab-rails console` with a Bash script provides a reliable method for exporting GitLab projects when standard methods fail. Configure `GITLAB_USER`, `OUTPUT_DIR`, and `REPO_LIST` according to your needs to easily create backups or migrate projects. 🔥
